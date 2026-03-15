@@ -1,0 +1,26 @@
+  # ===== 深度学习框架 =====
+  torch>=2.0.0                # PyTorch 核心库
+  torchvision>=0.15.0         # PyTorch 视觉工具包
+
+  # ===== YOLO 目标检测 =====
+  ultralytics>=8.0.0          # YOLOv8/v10 官方库
+
+  # ===== 图像处理 =====
+  opencv-python>=4.8.0        #
+  OpenCV（形态学、颜色空间）
+  pillow>=10.0.0              # Pillow（基础图像
+  I/O）
+
+  # ===== 科学计算 =====
+  numpy>=1.24.0               # 数组运算基础
+  scipy>=1.10.0               #
+  高级数学函数（形态学会用）
+
+  # ===== 可视化与日志 =====
+  matplotlib>=3.7.0           # 画 loss
+  曲线、结果图
+  tensorboard>=2.14.0         # 训练日志可视化
+  tqdm>=4.65.0                #
+  进度条（训练时显示）
+
+  ---
