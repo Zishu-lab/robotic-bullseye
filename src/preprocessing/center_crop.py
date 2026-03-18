@@ -1,3 +1,5 @@
+
+
 #!/usr/bin/env python3
 """
 靶心中心区域裁剪模块
@@ -81,7 +83,7 @@ class ImageBasedCrop(BaseCropStrategy):
 
     def _detect_circles(self, gray_image: np.ndarray) -> np.ndarray:
         """
-        使用霍夫圆变换检测圆（多参数组合）
+        使用霍夫圆变换检测圆
 
         Args:
             gray_image: 灰度图像
@@ -89,92 +91,21 @@ class ImageBasedCrop(BaseCropStrategy):
         Returns:
             检测到的圆数组，每行格式为 (x, y, radius)
         """
-        all_circles = []
-
-        # 尝试多种参数组合来检测不同大小的圆
-        # 参数组合1：检测大圆（外圈）
-        circles1 = cv2.HoughCircles(
+        circles = cv2.HoughCircles(
             gray_image,
             cv2.HOUGH_GRADIENT,
             dp=self.dp,
             minDist=self.min_dist,
             param1=self.param1,
             param2=self.param2,
-            minRadius=50,          # 调整：只检测较大的圆
+            minRadius=self.min_radius,
             maxRadius=self.max_radius
         )
-        if circles1 is not None:
-            all_circles.append(circles1[0])
 
-        # 参数组合2：检测中圆
-        circles2 = cv2.HoughCircles(
-            gray_image,
-            cv2.HOUGH_GRADIENT,
-            dp=self.dp,
-            minDist=self.min_dist // 2,  # 调整：允许更密集的圆
-            param1=self.param1,
-            param2=self.param2 - 10,    # 调整：降低阈值以检测更多圆
-            minRadius=30,
-            maxRadius=100
-        )
-        if circles2 is not None:
-            all_circles.append(circles2[0])
-
-        # 参数组合3：检测小圆（内圈）
-        circles3 = cv2.HoughCircles(
-            gray_image,
-            cv2.HOUGH_GRADIENT,
-            dp=self.dp,
-            minDist=self.min_dist // 3,
-            param1=self.param1,
-            param2=self.param2 - 20,    # 调整：进一步降低阈值
-            minRadius=10,
-            maxRadius=50
-        )
-        if circles3 is not None:
-            all_circles.append(circles3[0])
-
-        if not all_circles:
+        if circles is None:
             return np.array([])
 
-        # 合并所有检测到的圆
-        circles = np.vstack(all_circles)
-
-        # 去重（去除过于接近的圆）
-        circles = self._remove_duplicates(circles, threshold=20)
-
-        return np.round(circles).astype("int")
-
-    def _remove_duplicates(self, circles: np.ndarray, threshold: float = 20) -> np.ndarray:
-        """
-        去除重复的圆（圆心距离过近的圆）
-
-        Args:
-            circles: 圆数组 (N, 3) 每行是 (x, y, radius)
-            threshold: 距离阈值
-
-        Returns:
-            去重后的圆数组
-        """
-        if len(circles) == 0:
-            return circles
-
-        # 按半径排序（保留较大的圆）
-        sorted_indices = np.argsort(circles[:, 2])[::-1]
-        circles = circles[sorted_indices]
-
-        keep = []
-        for i, circle in enumerate(circles):
-            is_duplicate = False
-            for j in keep:
-                dist = np.sqrt((circle[0] - circles[j, 0])**2 + (circle[1] - circles[j, 1])**2)
-                if dist < threshold:
-                    is_duplicate = True
-                    break
-            if not is_duplicate:
-                keep.append(i)
-
-        return circles[keep]
+        return np.round(circles[0, :]).astype("int")
 
     def _find_center_point(self, circles: np.ndarray, image_shape: Tuple[int, int]) -> Tuple[int, int]:
         """
@@ -196,55 +127,9 @@ class ImageBasedCrop(BaseCropStrategy):
             # 只有一个圆，直接使用
             return (circles[0][0], circles[0][1])
 
-        # 多个圆，使用聚类算法分组（找到同心圆组）
-        from sklearn.cluster import DBSCAN
-
-        # 提取圆心坐标
-        centers = circles[:, :2]  # (x, y)
-
-        # 使用 DBSCAN 聚类（eps 参数决定聚类半径）
-        # 根据图像尺寸动态调整 eps
-        h, w = image_shape[:2]
-        eps = min(w, h) // 8  # 图像尺寸的 1/8 作为聚类半径
-        clustering = DBSCAN(eps=eps, min_samples=2).fit(centers)  # 至少 2 个圆才构成聚类
-        labels = clustering.labels_
-
-        # 找到最大的聚类（同心圆组）
-        unique_labels = np.unique(labels)
-
-        if len(unique_labels) == 1 and unique_labels[0] == -1:
-            # 所有点都是噪声点，使用所有点的平均
-            center_x = int(np.mean(centers[:, 0]))
-            center_y = int(np.mean(centers[:, 1]))
-        elif -1 in unique_labels:
-            # 有噪声点，只看有标签的点
-            non_noise_labels = unique_labels[unique_labels != -1]
-            if len(non_noise_labels) > 0:
-                # 找到最大的非噪声聚类
-                counts = []
-                for label in non_noise_labels:
-                    counts.append(np.sum(labels == label))
-                largest_cluster = non_noise_labels[np.argmax(counts)]
-
-                # 计算最大聚类的中心点
-                cluster_centers = centers[labels == largest_cluster]
-                center_x = int(np.mean(cluster_centers[:, 0]))
-                center_y = int(np.mean(cluster_centers[:, 1]))
-            else:
-                # 所有点都是噪声
-                center_x = int(np.mean(centers[:, 0]))
-                center_y = int(np.mean(centers[:, 1]))
-        else:
-            # 没有噪声点，找到最大聚类
-            counts = []
-            for label in unique_labels:
-                counts.append(np.sum(labels == label))
-            largest_cluster = unique_labels[np.argmax(counts)]
-
-            # 计算最大聚类的中心点
-            cluster_centers = centers[labels == largest_cluster]
-            center_x = int(np.mean(cluster_centers[:, 0]))
-            center_y = int(np.mean(cluster_centers[:, 1]))
+        # 多个圆，计算平均中心点（同心圆的情况）
+        center_x = int(np.mean(circles[:, 0]))
+        center_y = int(np.mean(circles[:, 1]))
 
         return (center_x, center_y)
 
