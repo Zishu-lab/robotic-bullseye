@@ -35,6 +35,7 @@ class BullseyePipeline:
         """
         初始化管道
 
+        
         Args:
             yolo_model_path: YOLO 模型路径
             cifar_model_path: CIFAR-100 模型路径
@@ -54,17 +55,7 @@ class BullseyePipeline:
 
         # 加载 CIFAR-100 模型
         logger.info("加载 CIFAR-100 模型...")
-        checkpoint = torch.load(str(cifar_model_path), map_location=self.device)
-        # 提取模型状态字典
-        if 'model_state_dict' in checkpoint:
-            # 加载ResNet模型结构
-            import torchvision.models as models
-            self.cifar_model = models.resnet18(weights=None)
-            self.cifar_model.fc = torch.nn.Linear(self.cifar_model.fc.in_features, 100)
-            self.cifar_model.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            self.cifar_model = checkpoint
-        self.cifar_model = self.cifar_model.to(self.device)
+        self.cifar_model = torch.load(str(cifar_model_path), map_location=self.device)
         self.cifar_model.eval()
         logger.info("✅ CIFAR-100 模型加载完成")
 
@@ -176,14 +167,12 @@ class BullseyePipeline:
 
         # 转换为 Tensor
         # CIFAR-100 的均值和标准差
-        mean = torch.tensor([0.5071, 0.4867, 0.4408]).view(3, 1, 1)
-        std = torch.tensor([0.2675, 0.2565, 0.2761]).view(3, 1, 1)
+        mean = np.array([0.5071, 0.4867, 0.4408])
+        std = np.array([0.2675, 0.2565, 0.2761])
 
-        # 转换为Tensor: HWC -> CHW
-        image_tensor = torch.from_numpy(image_resized).permute(2, 0, 1).float() / 255.0
-        # 标准化
+        image_tensor = image_resized.astype(np.float32) / 255.0
         image_tensor = (image_tensor - mean) / std
-        image_tensor = image_tensor.unsqueeze(0).to(self.device)
+        image_tensor = torch.from_numpy(image_tensor).permute(2, 0, 1).unsqueeze(0).to(self.device)
 
         # 预测
         with torch.no_grad():
@@ -318,7 +307,7 @@ def main():
 
     # 配置路径
     project_root = Path(__file__).parent.parent.parent
-    yolo_model_path = project_root / "runs/detect/runs/detect/bullseye_optimized/weights/best.pt"
+    yolo_model_path = project_root / "runs/detect/bullseye_train/weights/best.pt"
     cifar_model_path = project_root / "experiments/runs/cifar100_resnet18/best.pt"
     test_image = project_root / "data/raw/page_001.png"
 
@@ -341,7 +330,6 @@ def main():
     pipeline = BullseyePipeline(
         yolo_model_path=yolo_model_path,
         cifar_model_path=cifar_model_path,
-        conf_threshold=0.25,  # 降低置信度阈值
     )
 
     # 处理测试图片
