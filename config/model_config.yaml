@@ -1,25 +1,17 @@
 # 模型配置文件
 # 所有模型路径和相关参数的统一配置
 
-# YOLO 目标检测模型
-yolo:
-  model_path: "runs/detect/runs/detect/bullseye_train/weights/best.pt"
-  fallback_path: "runs/detect/runs/detect/bullseye_optimized/weights/best.pt"
-  conf_threshold: 0.3
-  image_size: 640
+models:
+  # YOLO 目标检测模型
+  yolo:
+    path: "runs/detect/runs/detect/bullseye_train/weights/best.pt"
+    confidence_threshold: 0.3
 
-# CIFAR-100 分类模型
-classifier:
-  # 优先使用 EfficientNet-B3 (80.18%)
-  model_path: "experiments/runs/cifar100_optimized/best.pt"
-  fallback_path: "models/classifier/final_classifier.pt"
-  num_classes: 100
-  input_size: 32
-
-  # 数据预处理参数 (CIFAR-100 标准化)
-  normalize:
-    mean: [0.5071, 0.4867, 0.4408]
-    std: [0.2675, 0.2565, 0.2761]
+  # CIFAR-100 分类模型
+  classifier:
+    # 优先使用 EfficientNet-B3 (80.18%)
+    path: "experiments/runs/cifar100_optimized/best.pt"
+    fallback_path: "models/classifier/final_classifier.pt"
 
 # 设备配置
 device:

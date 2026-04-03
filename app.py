@@ -6,6 +6,8 @@
 
 import cv2
 import sys
+import time
+import numpy as np
 from pathlib import Path
 from flask import Flask, Response, jsonify, request
 import logging
@@ -83,21 +85,30 @@ HTML = '''
 
         function startDetect() {
             var url = document.getElementById('urlInput').value;
+            document.getElementById('statusText').textContent = '连接中...';
+
+            // 先设置 URL，再启动检测
             fetch('/set_url', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({url: url})
+            })
+            .then(() => fetch('/start', {method: 'POST'}))
+            .then(r => r.json())
+            .then(d => {
+                alert(d.msg);
+                if (d.ok) {
+                    document.getElementById('statusText').textContent = '运行中';
+                    if (updateInterval) clearInterval(updateInterval);
+                    updateInterval = setInterval(updateStatus, 300);
+                } else {
+                    document.getElementById('statusText').textContent = '启动失败';
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                document.getElementById('statusText').textContent = '连接错误';
             });
-            fetch('/start', {method: 'POST'})
-                .then(r => r.json())
-                .then(d => {
-                    alert(d.msg);
-                    if (d.ok) {
-                        document.getElementById('statusText').textContent = '运行中';
-                        if (updateInterval) clearInterval(updateInterval);
-                        updateInterval = setInterval(updateStatus, 300);
-                    }
-                });
         }
 
         function stopDetect() {
@@ -139,11 +150,55 @@ HTML = '''
 
 def gen():
     """视频流生成器"""
+    logger.info("视频流生成器启动")
+    frame_count = 0
+    last_valid_frame = None
+    error_count = 0
+    max_errors = 30  # 最大连续错误数
+
     while True:
-        frame = service.get_current_frame()
-        if frame is not None:
-            _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n'
+        try:
+            frame = service.get_current_frame(timeout=0.5)
+
+            if frame is not None:
+                last_valid_frame = frame
+                _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n'
+                frame_count += 1
+                error_count = 0  # 重置错误计数
+
+                if frame_count % 100 == 0:
+                    logger.debug(f"已发送 {frame_count} 帧")
+            else:
+                error_count += 1
+
+                # 如果有上一帧，继续发送（避免画面完全卡住）
+                if last_valid_frame is not None and error_count < max_errors:
+                    _, buf = cv2.imencode('.jpg', last_valid_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n'
+                    time.sleep(0.03)  # 稍微等待
+                else:
+                    # 发送占位图像
+                    placeholder_img = np.zeros((360, 640, 3), dtype=np.uint8)
+                    cv2.putText(placeholder_img, "Waiting for stream...", (150, 180),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (100, 100, 100), 2)
+                    cv2.putText(placeholder_img, "Click 'Start Detection' to begin", (100, 220),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 80), 2)
+                    _, placeholder = cv2.imencode('.jpg', placeholder_img)
+
+                    yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + placeholder.tobytes() + b'\r\n'
+                    time.sleep(0.1)  # 避免忙等待
+
+                    if error_count % 50 == 0:
+                        logger.info(f"等待视频流... (错误计数: {error_count})")
+
+        except GeneratorExit:
+            logger.info("视频流生成器停止")
+            break
+        except Exception as e:
+            logger.error(f"视频流错误: {e}")
+            error_count += 1
+            time.sleep(0.1)
 
 
 @app.route('/')
@@ -153,7 +208,15 @@ def index():
 
 @app.route('/video')
 def video():
-    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(
+        gen(),
+        mimetype='multipart/x-mixed-replace; boundary=frame',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
 
 
 @app.route('/start', methods=['POST'])
@@ -182,6 +245,7 @@ def status():
 def set_url():
     url = request.json.get('url', '')
     logger.info(f"摄像头URL更新: {url}")
+    service.set_camera_url(url)
     return jsonify({'ok': True})
 
 

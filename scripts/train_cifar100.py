@@ -157,13 +157,15 @@ class CIFAR100Trainer:
 
         return model
 
-    def create_optimizer(self, model, learning_rate: float = 0.001):
+    def create_optimizer(self, model, learning_rate: float = 0.001, t_max: int = 30, use_warm_restarts: bool = False):
         """
         创建优化器和学习率调度器
 
         Args:
             model: 模型
             learning_rate: 学习率
+            t_max: 学习率调度周期
+            use_warm_restarts: 是否使用余弦退火重启调度器
 
         Returns:
             (optimizer, scheduler)
@@ -176,11 +178,20 @@ class CIFAR100Trainer:
             weight_decay=5e-4
         )
 
-        # 余弦退火学习率调度
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=30  # 30 轮后学习率降到最低
-        )
+        if use_warm_restarts:
+            # 余弦退火重启调度器 - 周期性重启学习率
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer,
+                T_0=10,      # 首次重启周期
+                T_mult=2,    # 每次重启后周期翻倍
+                eta_min=1e-5
+            )
+        else:
+            # 余弦退火学习率调度
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=t_max
+            )
 
         return optimizer, scheduler
 
@@ -274,6 +285,9 @@ class CIFAR100Trainer:
         epochs: int = 30,
         learning_rate: float = 0.001,
         save_dir: Path = Path("./runs/classify"),
+        resume_from: Path = None,
+        use_warm_restarts: bool = False,
+        reset_optimizer: bool = False,
     ):
         """
         训练模型
@@ -282,6 +296,9 @@ class CIFAR100Trainer:
             epochs: 训练轮数
             learning_rate: 学习率
             save_dir: 模型保存目录
+            resume_from: 恢复训练的检查点路径
+            use_warm_restarts: 是否使用余弦退火重启调度器
+            reset_optimizer: 恢复训练时是否重置优化器（使用新学习率）
         """
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -293,18 +310,40 @@ class CIFAR100Trainer:
         model = self.create_model(num_classes=len(classes))
 
         # 创建优化器
-        optimizer, scheduler = self.create_optimizer(model, learning_rate)
+        optimizer, scheduler = self.create_optimizer(
+            model, learning_rate, t_max=epochs, use_warm_restarts=use_warm_restarts
+        )
 
         # 损失函数
         criterion = nn.CrossEntropyLoss()
 
-        # 训练循环
+        # 恢复训练
+        start_epoch = 0
         best_acc = 0
+        if resume_from and Path(resume_from).exists():
+            logger.info(f"从检查点恢复: {resume_from}")
+            checkpoint = torch.load(resume_from, map_location=self.device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+
+            if reset_optimizer:
+                logger.info("重置优化器，使用新学习率重新开始")
+                best_acc = checkpoint.get('acc', 0)
+            else:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                start_epoch = checkpoint['epoch']
+                best_acc = checkpoint.get('acc', 0)
+                # 将学习率调度器推进到正确的位置（仅对非warm_restarts有效）
+                if not use_warm_restarts:
+                    for _ in range(start_epoch):
+                        scheduler.step()
+            logger.info(f"从 Epoch {start_epoch} 继续训练, 之前最佳准确率: {best_acc:.2f}%")
+
+        # 训练循环
         logger.info("=" * 60)
         logger.info("开始训练...")
         logger.info("=" * 60)
 
-        for epoch in range(1, epochs + 1):
+        for epoch in range(start_epoch + 1, epochs + 1):
             # 训练
             train_loss, train_acc = self.train_epoch(
                 model, train_loader, optimizer, criterion, epoch
@@ -351,9 +390,29 @@ class CIFAR100Trainer:
 
 def main():
     """主函数"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='CIFAR-100 分类模型训练')
+    parser.add_argument('--epochs', type=int, default=100, help='训练轮数 (默认: 100)')
+    parser.add_argument('--resume', type=str, default=None, help='恢复训练的检查点路径')
+    parser.add_argument('--lr', type=float, default=0.01, help='学习率 (默认: 0.01)')
+    parser.add_argument('--warm-restarts', action='store_true', help='使用余弦退火重启调度器')
+    parser.add_argument('--reset-optimizer', action='store_true', help='恢复时重置优化器')
+    args = parser.parse_args()
+
     # 配置路径
     project_root = Path(__file__).parent.parent
     save_dir = project_root / "experiments" / "runs" / "cifar100_resnet18"
+
+    # 如果指定恢复，使用检查点路径
+    resume_from = Path(args.resume) if args.resume else None
+
+    # 如果没有指定恢复，自动查找最佳模型
+    if resume_from is None:
+        best_model = save_dir / 'best.pt'
+        if best_model.exists():
+            resume_from = best_model
+            print(f"自动从最佳模型恢复: {resume_from}")
 
     # 创建训练器
     trainer = CIFAR100Trainer(
@@ -363,9 +422,12 @@ def main():
 
     # 开始训练
     trainer.train(
-        epochs=30,              # 30 轮训练
-        learning_rate=0.001,    # 初始学习率
+        epochs=args.epochs,
+        learning_rate=args.lr,
         save_dir=save_dir,
+        resume_from=resume_from,
+        use_warm_restarts=args.warm_restarts,
+        reset_optimizer=args.reset_optimizer,
     )
 
 
