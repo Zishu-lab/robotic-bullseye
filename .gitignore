@@ -1,27 +1,62 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
 venv/
 .env
 
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Data (large files)
 data/raw/*
 data/processed/*
+data/yolo_dataset/
+data/cifar100/
+data/test_results/
+data/validation_results/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/test_results/.gitkeep
+!data/validation_results/.gitkeep
 
+# Experiments
 experiments/runs/*
 experiments/logs/*
 !experiments/runs/.gitkeep
-experiments/runs/*     
-experiments/logs/*     
-!experiments/runs/.gitkeep
 !experiments/logs/.gitkeep
 
-.vscode/               
-.idea/                 
+# Models (trained/pretrained)
+models/pretrained/
+models/classifier/
+!models/pretrained/.gitkeep
+!models/classifier/.gitkeep
 
-.DS_Store              
-Thumbs.db             
+# YOLO runs
+runs/
 
-
-
+# Temporary files
+*.tmp
+*.temp
+*_result.jpg
+*_result.png
